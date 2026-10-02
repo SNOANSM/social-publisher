@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[functions]
+  directory = "netlify/functions"
+
+# Local development: `netlify dev` runs Next.js + functions + Blobs on http://localhost:8888
+[dev]
+  framework = "next"
+  targetPort = 3000
+  port = 8888
