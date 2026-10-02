@@ -4,7 +4,7 @@
 
 تطبيق ويب شخصي (لك أنت بس): ترفع فيديو أو صورة، تكتب الكابشن، تختار المنصة (انستقرام / يوتيوب / الاثنين)، وتضغط **نشر**.
 
-- تسجيل دخول بحساب Google، ومسموح لإيميل واحد فقط (`ALLOWED_EMAIL`). ما فيه تسجيل حسابات.
+- تسجيل دخول بإيميل وكلمة مرور لحساب واحد فقط (`ALLOWED_EMAIL`). ما فيه تسجيل حسابات، وكلمة المرور محفوظة كهاش scrypt مو نص.
 - كل الصفحات وكل الـ API تتحقق من الجلسة في كل طلب.
 - توكنات انستقرام ويوتيوب محفوظة في السيرفر **مشفّرة (AES-256-GCM)** وما توصل للمتصفح أبداً، وتتجدد تلقائياً.
 - رفع الملف من المتصفح على أجزاء (3 ميقا لكل جزء) إلى Netlify Blobs، والنشر يصير في **Background Function** (لين 15 دقيقة) والواجهة تتابع الحالة.
@@ -16,7 +16,7 @@
 ## المحتويات
 
 1. [المتطلبات](#1-المتطلبات)
-2. [إعداد Google Cloud (تسجيل الدخول + YouTube)](#2-إعداد-google-cloud-تسجيل-الدخول--youtube)
+2. [إعداد Google Cloud (YouTube)](#2-إعداد-google-cloud-youtube)
 3. [إعداد Meta for Developers (Instagram)](#3-إعداد-meta-for-developers-instagram)
 4. [متغيرات البيئة](#4-متغيرات-البيئة-env)
 5. [النشر على Netlify](#5-النشر-على-netlify)
@@ -37,9 +37,9 @@
 
 ---
 
-## 2. إعداد Google Cloud (تسجيل الدخول + YouTube)
+## 2. إعداد Google Cloud (YouTube)
 
-نستخدم **نفس OAuth Client** لشيئين: تسجيل الدخول للموقع، وربط قناة يوتيوب.
+الـ OAuth Client هذا لربط قناة يوتيوب فقط (الدخول للموقع نفسه بإيميل وكلمة مرور).
 
 ### 2.1 إنشاء مشروع
 1. ادخل [console.cloud.google.com](https://console.cloud.google.com).
@@ -67,11 +67,9 @@
 ### 2.4 إنشاء OAuth Client
 1. من **Clients ← Create client** (أو **Credentials ← Create Credentials ← OAuth client ID**).
 2. **Application type**: `Web application`.
-3. **Authorized redirect URIs** — أضف الأربعة (بدّل `your-site` برابط موقعك):
+3. **Authorized redirect URIs** — أضف الاثنين (بدّل `your-site` برابط موقعك):
    ```
-   https://your-site.netlify.app/api/auth/callback/google
    https://your-site.netlify.app/api/connect/youtube/callback
-   http://localhost:8888/api/auth/callback/google
    http://localhost:8888/api/connect/youtube/callback
    ```
 4. اضغط **Create** وانسخ:
@@ -152,9 +150,10 @@
 |---|---|---|
 | `APP_URL` | ✅ | رابط الموقع **بدون `/` في الآخر**، مثل `https://your-site.netlify.app`. محلياً: `http://localhost:8888`. يُستخدم لروابط الرجوع في OAuth ولتشغيل وظيفة النشر. |
 | `AUTH_SECRET` | ✅ | مفتاح عشوائي لتشفير جلسة الدخول. ولّده بـ `npx auth secret` أو `openssl rand -base64 32`. |
-| `AUTH_GOOGLE_ID` | ✅ | Client ID من Google Cloud (للدخول ولربط يوتيوب). |
+| `AUTH_GOOGLE_ID` | ✅ | Client ID من Google Cloud (لربط يوتيوب). |
 | `AUTH_GOOGLE_SECRET` | ✅ | Client secret من Google Cloud. |
 | `ALLOWED_EMAIL` | ✅ | الإيميل الوحيد المسموح له بالدخول. لو فاضي، **ما أحد يقدر يدخل**. |
+| `ADMIN_PASSWORD_HASH` | ✅ | هاش كلمة المرور. **لا تكتبه بيدك**: شغّل `npm run set-password` (يسألك عن الإيميل وكلمة المرور ويحفظهم في Netlify). للملف المحلي: `npm run set-password -- --local`. |
 | `TOKEN_ENCRYPTION_KEY` | ✅ | مفتاح تشفير التوكنات (32 حرف أو أكثر): `openssl rand -base64 32`. **لا تغيّره** بعد الربط، وإلا لازم تعيد ربط الحسابات. |
 | `META_APP_ID` | ✅ | App ID من Meta. |
 | `META_APP_SECRET` | ✅ | App secret من Meta. |
@@ -197,15 +196,16 @@ git push
 
 ### 5.5 حدّث روابط الرجوع
 تأكد إن رابط موقعك النهائي مضاف في:
-- Google Cloud ← OAuth Client ← **Authorized redirect URIs** (الرابطين).
+- Google Cloud ← OAuth Client ← **Authorized redirect URIs**.
 - Meta ← Facebook Login for Business ← **Valid OAuth Redirect URIs**.
 
 لو غيّرت الدومين بعدين، حدّث `APP_URL` والروابط هذي وأعد النشر.
 
 ### 5.6 جرّب
-1. افتح الموقع ← سجّل دخول بحساب Google (الإيميل اللي في `ALLOWED_EMAIL`).
-2. **الإعدادات ← ربط YouTube** و **ربط Instagram**.
-3. **نشر** ← ارفع فيديو ← اكتب الكابشن ← **نشر**.
+1. شغّل `npm run set-password` عشان تحدد إيميل وكلمة مرور الدخول، وأعد النشر.
+2. افتح الموقع ← سجّل دخول بالإيميل وكلمة المرور.
+3. **الإعدادات ← ربط YouTube** و **ربط Instagram**.
+4. **نشر** ← ارفع فيديو ← اكتب الكابشن ← **نشر**.
 
 > النشر عن طريق الـ CLI بديل: `npm i -g netlify-cli` ثم `netlify login` ثم `netlify init` ثم `netlify deploy --prod`.
 
@@ -244,7 +244,7 @@ npx netlify dev
 
 | الملف | الوظيفة |
 |---|---|
-| `src/auth.ts` | Auth.js: دخول Google + السماح لـ `ALLOWED_EMAIL` فقط |
+| `src/auth.ts` | Auth.js: دخول بإيميل وكلمة مرور لحساب واحد + حظر بعد المحاولات الغلط |
 | `src/lib/session.ts` | التحقق من الجلسة في كل صفحة وكل API |
 | `src/lib/crypto.ts` | تشفير التوكنات + توقيع الروابط المؤقتة |
 | `src/lib/tokens.ts` | حفظ التوكنات مشفرة + التجديد التلقائي |
@@ -257,7 +257,7 @@ npx netlify dev
 | `src/components/Composer.tsx` | صفحة النشر |
 
 ### الأمان
-- **الدخول:** Google فقط، والإيميل يتطابق مع `ALLOWED_EMAIL` في **كل طلب** (لو غيّرته، الجلسات القديمة تنقفل فوراً). الجلسة JWT مشفّرة لمدة 7 أيام.
+- **الدخول:** إيميل + كلمة مرور. كلمة المرور محفوظة كهاش scrypt في `ADMIN_PASSWORD_HASH`، وبعد 5 محاولات غلط من نفس الجهاز ينحظر ربع ساعة. الإيميل يتطابق مع `ALLOWED_EMAIL` في **كل طلب** (لو غيّرته، الجلسات القديمة تنقفل فوراً). الجلسة JWT مشفّرة لمدة 7 أيام.
 - **الحماية:** كل صفحة وكل API يتحقق بنفسه من الجلسة، وما يعتمد على middleware. الاستثناءات الوحيدة:
   - `/api/auth/*` (تسجيل الدخول نفسه).
   - `/api/media/<token>/...`: رابط الصورة اللي يحمّلها انستقرام. محمي بتوقيع HMAC ينتهي بعد ساعة.
@@ -300,7 +300,8 @@ npx netlify dev
 
 | المشكلة | الحل |
 |---|---|
-| "هذا الحساب غير مسموح له بالدخول" | تأكد إن `ALLOWED_EMAIL` نفس إيميل Google بالضبط. |
+| "الإيميل أو كلمة المرور غير صحيحة" | أعد تشغيل `npm run set-password` ثم أعد النشر. |
+| "محاولات كثيرة غلط" | انتظر ربع ساعة. |
 | `redirect_uri_mismatch` من Google | الرابط في Google Cloud لازم يطابق `APP_URL` + المسار بالضبط (https، بدون / زيادة). |
 | "Google ما رجّع refresh token" | احذف صلاحية التطبيق من [myaccount.google.com/permissions](https://myaccount.google.com/permissions) وأعد الربط. |
 | يوتيوب يطلب إعادة ربط كل أسبوع | التطبيق في Google بحالة Testing. حوّله لـ In production (شوف 2.3). |
