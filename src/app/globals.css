@@ -1,32 +1,93 @@
 @import "tailwindcss";
 
+/* Theme: <html data-theme="light|dark">, or no attribute = follow the phone/computer setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --canvas: #f5f5f2;
+  --card: #ffffff;
+  --field: #ffffff;
+  --ink: #1c1c1a;
+  --on-ink: #ffffff;
+  --muted: #6b6b66;
+  --line: #e4e3de;
+  --accent: #0f6e63;
+  --accent-soft: #e3f1ee;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --ok: #1a7f37;
+  --ok-soft: #e7f5ea;
+  --warn: #9a6700;
+  --warn-soft: #fff4d6;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --canvas: #0e0f11;
+  --card: #17191c;
+  --field: #111315;
+  --ink: #ececea;
+  --on-ink: #0e0f11;
+  --muted: #9b9c97;
+  --line: #2a2c30;
+  --accent: #4cc2ae;
+  --accent-soft: #11302b;
+  --danger: #ff7b6e;
+  --danger-soft: #3a1714;
+  --ok: #5fd27f;
+  --ok-soft: #12301b;
+  --warn: #f2c14e;
+  --warn-soft: #3a2e0f;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --canvas: #0e0f11;
+    --card: #17191c;
+    --field: #111315;
+    --ink: #ececea;
+    --on-ink: #0e0f11;
+    --muted: #9b9c97;
+    --line: #2a2c30;
+    --accent: #4cc2ae;
+    --accent-soft: #11302b;
+    --danger: #ff7b6e;
+    --danger-soft: #3a1714;
+    --ok: #5fd27f;
+    --ok-soft: #12301b;
+    --warn: #f2c14e;
+    --warn-soft: #3a2e0f;
+    color-scheme: dark;
+  }
+}
+
 @theme inline {
   --font-sans: var(--font-arabic), ui-sans-serif, system-ui, sans-serif;
-  --color-canvas: #f5f5f2;
-  --color-card: #ffffff;
-  --color-ink: #1c1c1a;
-  --color-muted: #6b6b66;
-  --color-line: #e4e3de;
-  --color-accent: #0f6e63;
-  --color-accent-soft: #e3f1ee;
-  --color-danger: #b42318;
-  --color-danger-soft: #fdecea;
-  --color-ok: #1a7f37;
-  --color-ok-soft: #e7f5ea;
-  --color-warn: #9a6700;
-  --color-warn-soft: #fff4d6;
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-field: var(--field);
+  --color-ink: var(--ink);
+  --color-on-ink: var(--on-ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
   --color-ig: #d62976;
   --color-yt: #ff0033;
 }
 
-:root {
-  color-scheme: light;
-}
-
 body {
-  background: var(--color-canvas);
-  color: var(--color-ink);
+  background: var(--canvas);
+  color: var(--ink);
   -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Latin text (URLs, numbers, hashtags) inside Arabic paragraphs */
@@ -36,6 +97,15 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Date/time picker icon follows the theme */
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: var(--picker-filter, none);
+}
+:root[data-theme="dark"] {
+  --picker-filter: invert(1);
 }

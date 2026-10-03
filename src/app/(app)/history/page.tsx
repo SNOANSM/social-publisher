@@ -5,7 +5,7 @@ import { HistoryView, type HistoryItem } from "@/components/HistoryView";
 export const dynamic = "force-dynamic";
 
 export default async function HistoryPage() {
-  await requirePageUser();
+  const me = await requirePageUser();
   const posts = await listPosts(300);
 
   const items: HistoryItem[] = posts.map(({ post, results }) => ({
@@ -15,6 +15,7 @@ export default async function HistoryPage() {
     count: post.items?.length ?? 1,
     text: post.instagram?.caption || post.youtube?.title || post.youtube?.description || "",
     hasThumb: !!post.hasThumb,
+    by: post.createdBy && post.createdBy !== me.email ? post.createdBy.split("@")[0] : undefined,
     platforms: post.platforms.map((p) => ({
       platform: p,
       status: results[p]?.status ?? "pending",

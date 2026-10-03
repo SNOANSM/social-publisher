@@ -2,11 +2,16 @@ import { requirePageUser } from "@/lib/session";
 import { getConnectionStatus } from "@/lib/tokens";
 import { formatDate } from "@/lib/format";
 import { PlatformIcon } from "@/components/PlatformIcon";
-import { disconnect, refreshNow } from "./actions";
+import { cookies } from "next/headers";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { THEME_COOKIE, parseTheme } from "@/lib/theme";
+import { listUsers } from "@/lib/users";
+import { addUserAction, changePasswordAction, disconnect, refreshNow, removeUserAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 const PLATFORM_LABEL = { youtube: "يوتيوب", instagram: "انستقرام" } as const;
+const INPUT = "w-full rounded-xl border border-line bg-field px-3 py-2.5 text-sm outline-none focus:border-accent";
 
 export default async function SettingsPage({ searchParams }: PageProps<"/settings">) {
   const user = await requirePageUser();
@@ -15,6 +20,9 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
   const error = typeof sp.error === "string" ? sp.error : null;
   const connected = typeof sp.connected === "string" ? sp.connected : null;
   const disconnected = typeof sp.disconnected === "string" ? sp.disconnected : null;
+  const ok = typeof sp.ok === "string" ? sp.ok : null;
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
+  const users = user.isOwner ? await listUsers() : [];
 
   const igDaysLeft = status.instagram.expiresInDays ?? null;
 
@@ -26,6 +34,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
       </div>
 
       {error && <p className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">{error}</p>}
+      {ok && <p className="rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">{ok}</p>}
       {connected && connected in PLATFORM_LABEL && (
         <p className="rounded-xl bg-ok-soft px-4 py-3 text-sm text-ok">تم ربط {PLATFORM_LABEL[connected as keyof typeof PLATFORM_LABEL]} بنجاح ✅</p>
       )}
@@ -68,12 +77,67 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         />
       </section>
 
-      <section className="rounded-2xl border border-line bg-card p-5 text-sm">
-        <h2 className="font-semibold">الحساب</h2>
-        <p className="mt-1 text-muted">
-          مسجّل الدخول بـ <span className="ltr font-medium text-ink">{user.email}</span>. الدخول مسموح لهذا الإيميل فقط.
-        </p>
+      <section className="space-y-3 rounded-2xl border border-line bg-card p-5">
+        <div>
+          <h2 className="font-semibold">المظهر</h2>
+          <p className="mt-0.5 text-sm text-muted">«تلقائي» يمشي حسب إعداد جوالك.</p>
+        </div>
+        <ThemeSwitcher initial={theme} />
       </section>
+
+      <section className="space-y-3 rounded-2xl border border-line bg-card p-5">
+        <div>
+          <h2 className="font-semibold">كلمة المرور</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            مسجّل الدخول بـ <span className="ltr font-medium text-ink">{user.email}</span>
+            {user.isOwner && " (صاحب الحساب)"}
+          </p>
+        </div>
+        <form action={changePasswordAction} className="grid gap-2 sm:grid-cols-3">
+          <input name="current" type="password" required autoComplete="current-password" placeholder="الحالية" className={INPUT} />
+          <input name="password" type="password" required minLength={10} autoComplete="new-password" placeholder="الجديدة (10+)" className={INPUT} />
+          <input name="confirm" type="password" required minLength={10} autoComplete="new-password" placeholder="أعد الجديدة" className={INPUT} />
+          <button className="rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-on-ink sm:col-span-3">تغيير كلمة المرور</button>
+        </form>
+      </section>
+
+      {user.isOwner && (
+        <section id="users" className="space-y-4 rounded-2xl border border-line bg-card p-5">
+          <div>
+            <h2 className="font-semibold">الأشخاص اللي يقدرون يدخلون</h2>
+            <p className="mt-0.5 text-sm text-muted">يشوفون نفس الحسابات المربوطة والمنشورات والخطة، ويقدرون ينشرون. ما يقدرون يضيفون أحد.</p>
+          </div>
+
+          <ul className="divide-y divide-line rounded-xl border border-line">
+            <li className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+              <span className="ltr truncate">{user.email}</span>
+              <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent">صاحب الحساب</span>
+            </li>
+            {users.map((u) => (
+              <li key={u.email} className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                <div className="min-w-0">
+                  {u.name && <p className="font-medium">{u.name}</p>}
+                  <p className="ltr truncate text-muted">{u.email}</p>
+                  <p className="text-xs text-muted">أُضيف {formatDate(u.createdAt)}</p>
+                </div>
+                <form action={removeUserAction}>
+                  <input type="hidden" name="email" value={u.email} />
+                  <button className="rounded-lg border border-line px-3 py-1.5 text-xs text-danger hover:bg-danger-soft">حذف</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+
+          <form action={addUserAction} className="grid gap-2 sm:grid-cols-2">
+            <input name="name" placeholder="الاسم (اختياري)" maxLength={60} className={INPUT} />
+            <input name="email" type="email" required placeholder="الإيميل" dir="ltr" className={INPUT} />
+            <input name="password" type="password" required minLength={10} autoComplete="new-password" placeholder="كلمة مرور له (10+)" className={INPUT} />
+            <input name="confirm" type="password" required minLength={10} autoComplete="new-password" placeholder="أعد كلمة المرور" className={INPUT} />
+            <button className="rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-on-ink sm:col-span-2">+ إضافة شخص</button>
+          </form>
+          <p className="text-xs text-muted">عطه الإيميل وكلمة المرور، ويقدر يغيّر كلمة المرور بنفسه من هنا بعد ما يدخل.</p>
+        </section>
+      )}
     </div>
   );
 }
@@ -107,7 +171,7 @@ function AccountRow(props: {
       <div className="flex shrink-0 flex-wrap gap-2">
         <a
           href={`/api/connect/${props.platform}`}
-          className="rounded-xl bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-ink/85"
+          className="rounded-xl bg-ink px-4 py-2 text-sm font-medium text-on-ink transition hover:bg-ink/85"
         >
           {props.connected ? "إعادة الربط" : `ربط ${props.title}`}
         </a>

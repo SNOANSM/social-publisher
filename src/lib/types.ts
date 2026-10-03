@@ -41,6 +41,8 @@ export interface Post {
   /** All files, in order. Older posts only have the single-file fields below. */
   items?: MediaItem[];
   hasThumb?: boolean;
+  /** Email of who created it (when several people use the app). */
+  createdBy?: string;
   // First file (kept for older posts and single-file code paths)
   uploadId: string;
   mediaKind: MediaKind;

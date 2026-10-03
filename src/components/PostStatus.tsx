@@ -76,7 +76,7 @@ export function PostStatus({ postId, onNew }: { postId: string; onNew: () => voi
     return (
       <div className="space-y-4">
         <p className="rounded-xl bg-canvas px-4 py-3 text-sm ring-1 ring-line">تم إلغاء المنشور المجدول وحذفه.</p>
-        <button onClick={onNew} className="w-full rounded-xl bg-ink px-4 py-3 font-medium text-white">
+        <button onClick={onNew} className="w-full rounded-xl bg-ink px-4 py-3 font-medium text-on-ink">
           منشور جديد
         </button>
       </div>
@@ -147,7 +147,7 @@ export function PostStatus({ postId, onNew }: { postId: string; onNew: () => voi
           <button
             onClick={publishNow}
             disabled={!!busy}
-            className="rounded-xl bg-ink px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-xl bg-ink px-4 py-3 text-sm font-medium text-on-ink disabled:opacity-50"
           >
             {busy === "now" ? "جاري…" : "انشر الحين"}
           </button>

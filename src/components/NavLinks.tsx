@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 const LINKS = [
   { href: "/", label: "نشر", icon: "M12 5v14M5 12h14" },
   { href: "/history", label: "السجل", icon: "M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" },
+  { href: "/plan", label: "الخطة", icon: "M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM8 13h3M8 16h6" },
+  { href: "/stats", label: "الإحصائيات", icon: "M4 20V10M10 20V4M16 20v-7M22 20H2" },
   {
     href: "/settings",
     label: "الإعدادات",
@@ -25,7 +27,7 @@ export function NavLinks({ variant }: { variant: "top" | "bottom" }) {
             key={l.href}
             href={l.href}
             className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-              isActive(l.href) ? "bg-ink text-white" : "text-muted hover:bg-line/60 hover:text-ink"
+              isActive(l.href) ? "bg-ink text-on-ink" : "text-muted hover:bg-line/60 hover:text-ink"
             }`}
           >
             {l.label}
@@ -37,12 +39,12 @@ export function NavLinks({ variant }: { variant: "top" | "bottom" }) {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
-      <div className="mx-auto grid max-w-md grid-cols-3">
+      <div className="mx-auto grid max-w-lg grid-cols-5">
         {LINKS.map((l) => (
           <Link
             key={l.href}
             href={l.href}
-            className={`flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium ${isActive(l.href) ? "text-accent" : "text-muted"}`}
+            className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium ${isActive(l.href) ? "text-accent" : "text-muted"}`}
           >
             <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d={l.icon} />

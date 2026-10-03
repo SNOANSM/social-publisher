@@ -12,6 +12,7 @@ export interface HistoryItem {
   count: number;
   text: string;
   hasThumb: boolean;
+  by?: string; // who posted it, when it wasn't me
   platforms: { platform: Platform; status: ResultStatus; url?: string; error?: string }[];
 }
 
@@ -72,7 +73,7 @@ export function HistoryView({ items }: { items: HistoryItem[] }) {
     return (
       <div className="rounded-2xl border border-dashed border-line bg-card px-6 py-12 text-center">
         <p className="font-medium">ما نشرت شي للحين</p>
-        <Link href="/" className="mt-3 inline-block rounded-xl bg-ink px-4 py-2 text-sm font-medium text-white">
+        <Link href="/" className="mt-3 inline-block rounded-xl bg-ink px-4 py-2 text-sm font-medium text-on-ink">
           منشور جديد
         </Link>
       </div>
@@ -158,7 +159,7 @@ export function HistoryView({ items }: { items: HistoryItem[] }) {
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={`/api/posts/${withThumb.id}/thumb`} alt="" className="absolute inset-0 size-full object-cover" />
-                    <span className="absolute inset-0 bg-ink/35" />
+                    <span className="absolute inset-0 bg-black/35" />
                     <span className="relative text-white drop-shadow">{date.getDate()}</span>
                   </>
                 ) : (
@@ -167,7 +168,7 @@ export function HistoryView({ items }: { items: HistoryItem[] }) {
                 {dayItems.length > 0 && (
                   <span
                     className={`absolute bottom-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[9px] font-semibold text-white ${
-                      anyScheduled ? "bg-accent" : "bg-ink"
+                      anyScheduled ? "bg-accent" : "bg-black/75"
                     }`}
                   >
                     {dayItems.length}
@@ -221,6 +222,7 @@ function PostCard({ item, timeLabel }: { item: HistoryItem; timeLabel: string })
         <div className="flex items-center justify-between gap-2 text-xs text-muted">
           <span>
             {timeLabel} · {item.kind === "video" ? "فيديو" : item.kind === "carousel" ? `${item.count} صور` : "صورة"}
+            {item.by && <> · بواسطة <span className="ltr">{item.by}</span></>}
           </span>
           <Link href={`/?post=${item.id}`} className="shrink-0 font-medium text-accent">
             {failed ? "إعادة المحاولة" : "التفاصيل"}

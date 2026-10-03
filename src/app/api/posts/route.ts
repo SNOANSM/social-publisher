@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { jsonError, requireApiUser } from "@/lib/session";
+import { apiUser, jsonError, requireApiUser } from "@/lib/session";
+import { updatePlanItem } from "@/lib/plan";
 import { getUpload } from "@/lib/uploads";
 import {
   SCHEDULE_MAX_DAYS,
@@ -45,6 +46,7 @@ interface CreateBody {
   captionMode?: string;
   scheduledAt?: string | null;
   thumbnail?: string | null;
+  ideaId?: string;
   media?: { width?: number; height?: number; duration?: number }[] | { width?: number; height?: number; duration?: number };
   instagram?: { caption?: string };
   youtube?: { title?: string; description?: string; tags?: unknown; privacy?: string; shorts?: boolean };
@@ -53,7 +55,7 @@ interface CreateBody {
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
 
 export async function POST(req: Request) {
-  const denied = await requireApiUser();
+  const { user, denied } = await apiUser();
   if (denied) return denied;
 
   const body = (await req.json().catch(() => null)) as CreateBody | null;
@@ -108,6 +110,7 @@ export async function POST(req: Request) {
     scheduledAt,
     items,
     hasThumb: !!thumb,
+    createdBy: user.email,
     uploadId: first.uploadId,
     mediaKind,
     fileName: first.fileName,
@@ -162,6 +165,8 @@ export async function POST(req: Request) {
     await Promise.all(results.map(({ platform, result }) => setResult(post.id, platform, result)));
     await Promise.all(results.map(({ platform, result }) => triggerPublish(post.id, platform, result)));
   }
+
+  if (typeof body.ideaId === "string") await updatePlanItem(body.ideaId, { status: "done", postId: post.id }).catch(() => null);
 
   return NextResponse.json({ id: post.id });
 }

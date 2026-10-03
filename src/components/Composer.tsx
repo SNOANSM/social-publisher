@@ -30,6 +30,8 @@ import type { Platform, YouTubePrivacy } from "@/lib/types";
 interface Props {
   connected: Record<Platform, boolean>;
   initialPostId?: string;
+  /** Started from an idea in the plan: prefill the caption (and the schedule time if it's in the future). */
+  idea?: { id: string; title: string; notes: string; date?: string; time?: string };
 }
 
 type Phase = "edit" | "uploading" | "publishing";
@@ -76,7 +78,8 @@ const friendlyDate = (value: string) =>
     new Date(value),
   );
 
-export function Composer({ connected, initialPostId }: Props) {
+export function Composer({ connected, initialPostId, idea }: Props) {
+  const ideaTime = idea?.date ? `${idea.date}T${idea.time ?? "20:00"}` : "";
   const [phase, setPhase] = useState<Phase>(initialPostId ? "publishing" : "edit");
   const [postId, setPostId] = useState<string | null>(initialPostId ?? null);
 
@@ -92,7 +95,7 @@ export function Composer({ connected, initialPostId }: Props) {
     youtube: connected.youtube,
   });
   const [unified, setUnified] = useState(true);
-  const [caption, setCaption] = useState("");
+  const [caption, setCaption] = useState(() => (idea ? [idea.title, idea.notes].filter(Boolean).join("\n\n") : ""));
   const [ytDescription, setYtDescription] = useState("");
   const [ytTitle, setYtTitle] = useState("");
   const [titleTouched, setTitleTouched] = useState(false);
@@ -100,8 +103,8 @@ export function Composer({ connected, initialPostId }: Props) {
   const [privacy, setPrivacy] = useState<YouTubePrivacy>("public");
   const [shorts, setShorts] = useState(true);
 
-  const [when, setWhen] = useState<"now" | "later">("now");
-  const [scheduleAt, setScheduleAt] = useState("");
+  const [when, setWhen] = useState<"now" | "later">(() => (ideaTime && Date.parse(ideaTime) > Date.now() + 5 * 60_000 ? "later" : "now"));
+  const [scheduleAt, setScheduleAt] = useState(ideaTime);
 
   const [uploadPct, setUploadPct] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -263,6 +266,7 @@ export function Composer({ connected, initialPostId }: Props) {
           captionMode: separate ? "separate" : "unified",
           scheduledAt: when === "later" ? new Date(scheduleAt).toISOString() : null,
           thumbnail,
+          ideaId: idea?.id,
           media: media.map((m) => ({ width: m.width, height: m.height, duration: m.duration })),
           instagram: ig ? { caption } : undefined,
           youtube: yt
@@ -311,12 +315,15 @@ export function Composer({ connected, initialPostId }: Props) {
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold">منشور جديد</h1>
+      {idea && (
+        <p className="rounded-xl bg-accent-soft px-4 py-3 text-sm text-accent">💡 من الخطة: {idea.title}</p>
+      )}
 
       {/* 1. Media */}
       <section className="rounded-2xl border border-line bg-card p-4">
         {media.length === 1 ? (
           <div className="flex flex-col gap-4 sm:flex-row">
-            <div className="flex max-h-80 items-center justify-center overflow-hidden rounded-xl bg-ink/95 sm:w-56 sm:shrink-0">
+            <div className="flex max-h-80 items-center justify-center overflow-hidden rounded-xl bg-black sm:w-56 sm:shrink-0">
               {first.kind === "video" ? (
                 <video src={first.previewUrl} controls playsInline className="max-h-80 w-full object-contain" />
               ) : (
@@ -365,7 +372,7 @@ export function Composer({ connected, initialPostId }: Props) {
                 <div key={m.previewUrl} className="group relative aspect-square overflow-hidden rounded-xl bg-canvas">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={m.previewUrl} alt={`صورة ${i + 1}`} className="size-full object-cover" />
-                  <span className="absolute start-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-ink/80 text-xs font-semibold text-white">
+                  <span className="absolute start-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-black/70 text-xs font-semibold text-white">
                     {i + 1}
                   </span>
                   <button
@@ -380,7 +387,7 @@ export function Composer({ connected, initialPostId }: Props) {
                       onClick={() => move(i, -1)}
                       disabled={i === 0}
                       aria-label="قدّم الصورة"
-                      className="flex size-7 items-center justify-center rounded-full bg-white/90 text-sm shadow disabled:opacity-0"
+                      className="flex size-7 items-center justify-center rounded-full bg-white/90 text-sm text-black shadow disabled:opacity-0"
                     >
                       →
                     </button>
@@ -388,7 +395,7 @@ export function Composer({ connected, initialPostId }: Props) {
                       onClick={() => move(i, 1)}
                       disabled={i === media.length - 1}
                       aria-label="أخّر الصورة"
-                      className="flex size-7 items-center justify-center rounded-full bg-white/90 text-sm shadow disabled:opacity-0"
+                      className="flex size-7 items-center justify-center rounded-full bg-white/90 text-sm text-black shadow disabled:opacity-0"
                     >
                       ←
                     </button>
@@ -504,7 +511,7 @@ export function Composer({ connected, initialPostId }: Props) {
               rows={6}
               dir="auto"
               placeholder="اكتب الكابشن هنا…"
-              className="w-full resize-y rounded-xl border border-line bg-white px-3 py-2.5 leading-relaxed outline-none focus:border-accent"
+              className="w-full resize-y rounded-xl border border-line bg-field px-3 py-2.5 leading-relaxed outline-none focus:border-accent"
             />
           </Field>
         </section>
@@ -527,7 +534,7 @@ export function Composer({ connected, initialPostId }: Props) {
               }}
               dir="auto"
               placeholder="عنوان الفيديو"
-              className="w-full rounded-xl border border-line bg-white px-3 py-2.5 outline-none focus:border-accent"
+              className="w-full rounded-xl border border-line bg-field px-3 py-2.5 outline-none focus:border-accent"
             />
             {!titleTouched && effectiveTitle && <p className="mt-1 text-xs text-muted">مأخوذ من أول سطر. عدّله إذا تبي.</p>}
           </Field>
@@ -554,7 +561,7 @@ export function Composer({ connected, initialPostId }: Props) {
                 rows={5}
                 dir="auto"
                 placeholder="وصف الفيديو…"
-                className="w-full resize-y rounded-xl border border-line bg-white px-3 py-2.5 leading-relaxed outline-none focus:border-accent"
+                className="w-full resize-y rounded-xl border border-line bg-field px-3 py-2.5 leading-relaxed outline-none focus:border-accent"
               />
             </Field>
           )}
@@ -565,7 +572,7 @@ export function Composer({ connected, initialPostId }: Props) {
               onChange={(e) => setTagsInput(e.target.value)}
               dir="auto"
               placeholder="افصل بينها بفاصلة: سفر، تصوير، يوميات"
-              className="w-full rounded-xl border border-line bg-white px-3 py-2.5 outline-none focus:border-accent"
+              className="w-full rounded-xl border border-line bg-field px-3 py-2.5 outline-none focus:border-accent"
             />
             {tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -639,7 +646,7 @@ export function Composer({ connected, initialPostId }: Props) {
                 min={toLocalInput(new Date(now + 5 * 60 * 1000))}
                 max={toLocalInput(new Date(now + SCHEDULE_MAX_DAYS * 86_400_000))}
                 onChange={(e) => setScheduleAt(e.target.value)}
-                className="ltr w-full rounded-xl border border-line bg-white px-3 py-2.5 outline-none focus:border-accent"
+                className="ltr w-full rounded-xl border border-line bg-field px-3 py-2.5 outline-none focus:border-accent"
               />
               {scheduleAt && !Number.isNaN(Date.parse(scheduleAt)) && (
                 <p className="text-sm text-accent">بينزل: {friendlyDate(scheduleAt)}</p>
@@ -670,7 +677,7 @@ export function Composer({ connected, initialPostId }: Props) {
         <button
           onClick={publish}
           disabled={errors.length > 0 || preparing}
-          className="w-full rounded-xl bg-ink px-4 py-3.5 text-base font-semibold text-white transition hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full rounded-xl bg-ink px-4 py-3.5 text-base font-semibold text-on-ink transition hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {when === "later" ? "⏰ جدولة" : "نشر"}
           {ig && yt ? " على المنصتين" : ig ? " على انستقرام" : yt ? " على يوتيوب" : ""}
@@ -706,7 +713,7 @@ function PlatformToggle(props: {
       </span>
       <span
         className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
-          props.checked ? "border-ink bg-ink text-white" : "border-line"
+          props.checked ? "border-ink bg-ink text-on-ink" : "border-line"
         }`}
       >
         {props.checked && (

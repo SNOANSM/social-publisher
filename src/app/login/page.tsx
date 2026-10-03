@@ -36,7 +36,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     <main className="flex min-h-dvh items-center justify-center px-4">
       <div className="w-full max-w-sm rounded-2xl border border-line bg-card p-8 shadow-sm">
         <div className="text-center">
-          <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-xl bg-ink text-xl font-bold text-white">ن</div>
+          <div className="mx-auto mb-5 flex size-12 items-center justify-center rounded-xl bg-ink text-xl font-bold text-on-ink">ن</div>
           <h1 className="text-xl font-bold">ناشر</h1>
           <p className="mt-1 text-sm text-muted">لوحة نشر خاصة. الدخول لصاحبها فقط.</p>
         </div>
@@ -52,7 +52,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
               required
               autoComplete="username"
               dir="ltr"
-              className="w-full rounded-xl border border-line bg-white px-3 py-2.5 outline-none focus:border-accent"
+              className="w-full rounded-xl border border-line bg-field px-3 py-2.5 outline-none focus:border-accent"
             />
           </label>
           <label className="block">
@@ -63,10 +63,10 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
               required
               autoComplete="current-password"
               dir="ltr"
-              className="w-full rounded-xl border border-line bg-white px-3 py-2.5 outline-none focus:border-accent"
+              className="w-full rounded-xl border border-line bg-field px-3 py-2.5 outline-none focus:border-accent"
             />
           </label>
-          <button className="w-full rounded-xl bg-ink px-4 py-3 font-medium text-white transition hover:bg-ink/85">دخول</button>
+          <button className="w-full rounded-xl bg-ink px-4 py-3 font-medium text-on-ink transition hover:bg-ink/85">دخول</button>
         </form>
       </div>
     </main>
