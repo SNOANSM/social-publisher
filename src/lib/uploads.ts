@@ -46,6 +46,12 @@ export async function markComplete(meta: UploadMeta): Promise<void> {
   await mediaStore().setJSON(metaKey(meta.id), { ...meta, complete: true });
 }
 
+/** Restarts the 3-day retention clock (used when a scheduled post goes out). */
+export async function touchUpload(id: string): Promise<void> {
+  const meta = await getUpload(id);
+  if (meta) await mediaStore().setJSON(metaKey(id), { ...meta, createdAt: new Date().toISOString() });
+}
+
 export async function readChunk(meta: UploadMeta, index: number): Promise<Uint8Array> {
   const buf = (await mediaStore().get(chunkKey(meta.id, index), { type: "arrayBuffer" })) as ArrayBuffer | null;
   if (!buf) throw new Error(`الجزء ${index} من الملف مفقود`);

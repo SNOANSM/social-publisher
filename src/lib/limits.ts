@@ -8,6 +8,7 @@ export const CHUNK_SIZE = 3 * 1024 * 1024;
 export const MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GB
 export const IG_MAX_VIDEO_SIZE = 300 * 1024 * 1024; // resumable upload ceiling
 export const IG_MAX_IMAGE_SIZE = 8 * 1024 * 1024;
+export const IG_CAROUSEL_MAX = 10;
 export const IG_CAPTION_MAX = 2200;
 export const IG_MAX_HASHTAGS = 30;
 export const IG_REEL_MIN_SECONDS = 3;

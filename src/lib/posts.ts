@@ -1,12 +1,18 @@
 import { dataStore } from "./stores";
 import { randomId } from "./crypto";
 import { deleteUpload } from "./uploads";
-import { type Platform, type PlatformResult, type Post, type PostWithResults } from "./types";
+import { type MediaItem, type Platform, type PlatformResult, type Post, type PostWithResults } from "./types";
 
 // Each platform writes its own result key, so two background functions
 // running in parallel never overwrite each other's progress.
 const postKey = (id: string) => `posts/${id}`;
 const resultKey = (id: string, platform: Platform) => `results/${id}/${platform}`;
+const scheduleKey = (id: string) => `schedule/${id}`;
+const thumbKey = (id: string) => `thumbs/${id}`;
+
+// Max scheduling horizon and minimum lead time.
+export const SCHEDULE_MAX_DAYS = 60;
+export const SCHEDULE_MIN_LEAD_MS = 2 * 60 * 1000;
 
 // A background function can run for at most 15 minutes.
 const STALE_AFTER_MS = 16 * 60 * 1000;
@@ -35,6 +41,27 @@ export async function getResult(id: string, platform: Platform): Promise<Platfor
 
 export async function setResult(id: string, platform: Platform, result: PlatformResult): Promise<void> {
   await dataStore().setJSON(resultKey(id, platform), { ...result, updatedAt: new Date().toISOString() });
+}
+
+/** Every file of a post, also for older single-file posts. */
+export function postItems(post: Post): MediaItem[] {
+  if (post.items?.length) return post.items;
+  return [
+    {
+      uploadId: post.uploadId,
+      kind: post.mediaKind === "video" ? "video" : "image",
+      fileName: post.fileName,
+      mimeType: post.mimeType,
+      size: post.size,
+      width: post.width,
+      height: post.height,
+      duration: post.duration,
+    },
+  ];
+}
+
+export function newScheduledResult(): PlatformResult {
+  return { status: "scheduled", attemptId: randomId(9), attempts: 0, step: "مجدول", updatedAt: new Date().toISOString() };
 }
 
 export function newPendingResult(previous?: PlatformResult | null): PlatformResult {
@@ -91,7 +118,7 @@ export async function cleanupIfDone(data: PostWithResults): Promise<PostWithResu
   if (post.mediaDeleted) return data;
   const allSucceeded = post.platforms.every((p) => results[p]?.status === "success");
   if (!allSucceeded) return data;
-  await deleteUpload(post.uploadId);
+  for (const item of postItems(post)) await deleteUpload(item.uploadId);
   const updated = { ...post, mediaDeleted: true };
   await savePost(updated);
   return { post: updated, results };
@@ -105,4 +132,49 @@ export async function listPosts(limit = 100): Promise<PostWithResults[]> {
     .slice(0, limit);
   const items = await Promise.all(ids.map((id) => getPostWithResults(id)));
   return items.filter((x): x is PostWithResults => x !== null);
+}
+
+/* ------------------------------ Scheduling ------------------------------ */
+
+export async function addToSchedule(id: string, scheduledAt: string): Promise<void> {
+  await dataStore().setJSON(scheduleKey(id), { scheduledAt });
+}
+
+export async function removeFromSchedule(id: string): Promise<void> {
+  await dataStore().delete(scheduleKey(id));
+}
+
+export async function listSchedule(): Promise<{ postId: string; scheduledAt: string }[]> {
+  const store = dataStore();
+  const { blobs } = await store.list({ prefix: "schedule/" });
+  const entries = await Promise.all(
+    blobs.map(async (b) => {
+      const value = (await store.get(b.key, { type: "json" })) as { scheduledAt: string } | null;
+      return value ? { postId: b.key.slice("schedule/".length), scheduledAt: value.scheduledAt } : null;
+    }),
+  );
+  return entries.filter((e): e is { postId: string; scheduledAt: string } => e !== null);
+}
+
+/* ------------------------------ Thumbnails ------------------------------ */
+
+export async function saveThumb(id: string, jpeg: ArrayBuffer): Promise<void> {
+  await dataStore().set(thumbKey(id), jpeg);
+}
+
+export async function getThumb(id: string): Promise<ArrayBuffer | null> {
+  if (!isValidPostId(id)) return null;
+  return (await dataStore().get(thumbKey(id), { type: "arrayBuffer" })) as ArrayBuffer | null;
+}
+
+/** Removes a post completely (used when a scheduled post is cancelled). */
+export async function deletePost(post: Post): Promise<void> {
+  const store = dataStore();
+  await removeFromSchedule(post.id);
+  for (const item of postItems(post)) await deleteUpload(item.uploadId);
+  await Promise.all([
+    ...post.platforms.map((p) => store.delete(resultKey(post.id, p))),
+    store.delete(thumbKey(post.id)),
+  ]);
+  await store.delete(postKey(post.id));
 }

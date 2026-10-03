@@ -86,12 +86,35 @@ function streamToRupload(url: string, token: string, upload: UploadMeta, progres
   });
 }
 
-export async function publishToInstagram(post: Post, upload: UploadMeta, progress: Progress): Promise<{ id: string; url: string }> {
+export async function publishToInstagram(post: Post, uploads: UploadMeta[], progress: Progress): Promise<{ id: string; url: string }> {
+  const upload = uploads[0];
   const caption = post.instagram?.caption ?? "";
   const { igUserId, token } = await getInstagramCredentials();
 
   let containerId: string;
-  if (post.mediaKind === "image") {
+  if (post.mediaKind === "carousel") {
+    // Several images in one post: one child container per image, then a CAROUSEL container.
+    const children: string[] = [];
+    for (const [i, item] of uploads.entries()) {
+      await progress(`تجهيز الصورة ${i + 1} من ${uploads.length}`, Math.round((i / uploads.length) * 80));
+      const child = await graphPost<{ id: string }>(`${igUserId}/media`, {
+        image_url: `${appUrl()}/api/media/${signMediaToken(item.id)}/image.jpg`,
+        is_carousel_item: "true",
+        access_token: token,
+      });
+      await waitForContainer(child.id, token, progress, 3 * 60 * 1000);
+      children.push(child.id);
+    }
+    await progress("إنشاء البوست في انستقرام", 90);
+    const container = await graphPost<{ id: string }>(`${igUserId}/media`, {
+      media_type: "CAROUSEL",
+      children: children.join(","),
+      caption,
+      access_token: token,
+    });
+    containerId = container.id;
+    await waitForContainer(containerId, token, progress, 3 * 60 * 1000);
+  } else if (post.mediaKind === "image") {
     await progress("إنشاء البوست في انستقرام", 10);
     const imageUrl = `${appUrl()}/api/media/${signMediaToken(upload.id)}/image.jpg`;
     const container = await graphPost<{ id: string }>(`${igUserId}/media`, {

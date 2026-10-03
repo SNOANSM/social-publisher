@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { PlatformIcon } from "@/components/PlatformIcon";
 import { PostStatus } from "@/components/PostStatus";
-import { apiJson, mimeOf, prepareMedia, uploadFile, type PreparedMedia } from "@/lib/client-media";
+import { apiJson, makeThumbnail, mimeOf, prepareMedia, uploadFiles, type PreparedMedia } from "@/lib/client-media";
 import { formatBytes, formatDuration } from "@/lib/format";
 import {
   IG_CAPTION_MAX,
+  IG_CAROUSEL_MAX,
   IG_MAX_HASHTAGS,
   IG_MAX_IMAGE_SIZE,
   IG_MAX_VIDEO_SIZE,
@@ -39,20 +40,52 @@ const PRIVACY: { value: YouTubePrivacy; label: string }[] = [
   { value: "private", label: "خاص" },
 ];
 
+const SCHEDULE_MAX_DAYS = 60;
+
 function firstLine(text: string): string {
   const line = text.split("\n").find((l) => l.trim()) ?? "";
   return Array.from(line.replace(/[<>]/g, "").trim()).slice(0, YT_TITLE_MAX).join("");
 }
 
+// <input type="datetime-local"> works in local time "YYYY-MM-DDTHH:mm".
+function toLocalInput(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function defaultScheduleTime(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(d.getMinutes() < 30 ? 30 : 60, 0, 0);
+  return toLocalInput(d);
+}
+
+// Current time for validation, refreshed every 30 seconds (keeps render pure).
+let nowValue = Date.now();
+function subscribeNow(onChange: () => void) {
+  nowValue = Date.now();
+  const id = setInterval(() => {
+    nowValue = Date.now();
+    onChange();
+  }, 30_000);
+  return () => clearInterval(id);
+}
+const getNow = () => nowValue;
+
+const friendlyDate = (value: string) =>
+  new Intl.DateTimeFormat("ar", { dateStyle: "full", timeStyle: "short", calendar: "gregory", numberingSystem: "latn" }).format(
+    new Date(value),
+  );
+
 export function Composer({ connected, initialPostId }: Props) {
   const [phase, setPhase] = useState<Phase>(initialPostId ? "publishing" : "edit");
   const [postId, setPostId] = useState<string | null>(initialPostId ?? null);
 
-  const [media, setMedia] = useState<PreparedMedia | null>(null);
+  const [media, setMedia] = useState<PreparedMedia[]>([]);
   const [preparing, setPreparing] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const addMode = useRef(false);
 
   const [platforms, setPlatforms] = useState<Record<Platform, boolean>>({
     instagram: connected.instagram,
@@ -67,13 +100,21 @@ export function Composer({ connected, initialPostId }: Props) {
   const [privacy, setPrivacy] = useState<YouTubePrivacy>("public");
   const [shorts, setShorts] = useState(true);
 
+  const [when, setWhen] = useState<"now" | "later">("now");
+  const [scheduleAt, setScheduleAt] = useState("");
+
   const [uploadPct, setUploadPct] = useState(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Revoke preview URLs when the media changes.
-  useEffect(() => () => void (media && URL.revokeObjectURL(media.previewUrl)), [media]);
+  // Free preview URLs when leaving the page.
+  const mediaRef = useRef(media);
+  useEffect(() => {
+    mediaRef.current = media;
+  }, [media]);
+  useEffect(() => () => mediaRef.current.forEach((m) => URL.revokeObjectURL(m.previewUrl)), []);
+  const now = useSyncExternalStore(subscribeNow, getNow, getNow);
 
-  // Warn before closing the tab while the file is still uploading.
+  // Warn before closing the tab while files are still uploading.
   useEffect(() => {
     if (phase !== "uploading") return;
     const handler = (e: BeforeUnloadEvent) => e.preventDefault();
@@ -81,38 +122,36 @@ export function Composer({ connected, initialPostId }: Props) {
     return () => window.removeEventListener("beforeunload", handler);
   }, [phase]);
 
-  const isVideo = media?.kind === "video";
+  const first = media[0];
+  const kind = media.length === 0 ? null : media.length > 1 ? "carousel" : first.kind;
+  const isVideo = kind === "video";
   const ig = platforms.instagram && connected.instagram;
-  const yt = platforms.youtube && connected.youtube && media?.kind !== "image";
+  const yt = platforms.youtube && connected.youtube && kind === "video";
   const both = ig && yt;
   const separate = both && !unified;
 
-  // Description source: shared caption (unified) or its own text.
   const effectiveDescription = ig && !separate ? caption : ytDescription;
   const effectiveTitle = titleTouched ? ytTitle : firstLine(ig ? caption : ytDescription);
   const tags = useMemo(() => parseTags(tagsInput), [tagsInput]);
-  const shortsEligible = isShortsEligible(media?.width, media?.height, media?.duration);
+  const shortsEligible = isVideo && isShortsEligible(first?.width, first?.height, first?.duration);
 
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (!media) errors.push("اختر فيديو أو صورة.");
+  if (!media.length) errors.push("اختر فيديو أو صورة.");
   if (!ig && !yt) errors.push("اختر منصة وحدة على الأقل.");
   if (ig) {
     if (charCount(caption) > IG_CAPTION_MAX) errors.push(`كابشن انستقرام أطول من ${IG_CAPTION_MAX} حرف.`);
     if (hashtagCount(caption) > IG_MAX_HASHTAGS) errors.push(`انستقرام يسمح بـ ${IG_MAX_HASHTAGS} هاشتاق كحد أقصى.`);
-    if (media?.kind === "video" && media.file.size > IG_MAX_VIDEO_SIZE) errors.push("فيديو انستقرام لازم يكون أقل من 300 ميقا.");
-    if (media?.kind === "image" && media.file.size > IG_MAX_IMAGE_SIZE) errors.push("صورة انستقرام لازم تكون أقل من 8 ميقا.");
-    if (media?.kind === "video" && media.duration !== undefined) {
-      if (media.duration < IG_REEL_MIN_SECONDS) warnings.push("الريل في انستقرام لازم يكون 3 ثواني أو أكثر.");
-      if (media.duration > IG_REEL_MAX_SECONDS) warnings.push("الريل في انستقرام حده 15 دقيقة.");
+    if (isVideo && first.file.size > IG_MAX_VIDEO_SIZE) errors.push("فيديو انستقرام لازم يكون أقل من 300 ميقا.");
+    if (media.some((m) => m.kind === "image" && m.file.size > IG_MAX_IMAGE_SIZE)) errors.push("كل صورة لازم تكون أقل من 8 ميقا.");
+    if (isVideo && first.duration !== undefined) {
+      if (first.duration < IG_REEL_MIN_SECONDS) warnings.push("الريل في انستقرام لازم يكون 3 ثواني أو أكثر.");
+      if (first.duration > IG_REEL_MAX_SECONDS) warnings.push("الريل في انستقرام حده 15 دقيقة.");
     }
-    if (media?.kind === "video" && !/^video\/(mp4|quicktime)$/.test(media.file.type)) {
-      warnings.push("انستقرام يقبل MP4 أو MOV فقط.");
-    }
-    if (media?.kind === "image" && media.width && media.height) {
-      const ratio = media.width / media.height;
-      if (ratio < 0.8 || ratio > 1.91) warnings.push("نسبة أبعاد الصورة خارج حدود انستقرام (من 4:5 إلى 1.91:1)، وممكن ينرفض النشر.");
-    }
+    if (isVideo && !/^video\/(mp4|quicktime)$/.test(first.file.type)) warnings.push("انستقرام يقبل MP4 أو MOV فقط.");
+    const badRatio = media.filter((m) => m.kind === "image" && m.width && m.height && (m.width / m.height < 0.8 || m.width / m.height > 1.91));
+    if (badRatio.length) warnings.push("بعض الصور أبعادها خارج حدود انستقرام (من 4:5 إلى 1.91:1)، وممكن ينرفض النشر.");
+    if (kind === "carousel") warnings.push("انستقرام يعرض كل الصور بأبعاد أول صورة.");
   }
   if (yt) {
     if (!effectiveTitle.trim()) errors.push("اكتب عنوان ليوتيوب.");
@@ -120,17 +159,40 @@ export function Composer({ connected, initialPostId }: Props) {
     if (byteCount(effectiveDescription) > YT_DESCRIPTION_MAX_BYTES) errors.push("وصف يوتيوب أطول من المسموح.");
     if (tagsLength(tags) > YT_TAGS_MAX_CHARS) errors.push(`مجموع التاقات أطول من ${YT_TAGS_MAX_CHARS} حرف.`);
   }
+  if (when === "later") {
+    const at = Date.parse(scheduleAt);
+    if (!scheduleAt || Number.isNaN(at)) errors.push("اختر يوم ووقت الجدولة.");
+    else if (at < now + 2 * 60 * 1000) errors.push("وقت الجدولة لازم يكون بعد دقيقتين على الأقل.");
+    else if (at > now + SCHEDULE_MAX_DAYS * 86_400_000) errors.push(`تقدر تجدول لين ${SCHEDULE_MAX_DAYS} يوم قدام.`);
+  }
 
-  const pickFile = async (file: File | undefined) => {
-    if (!file) return;
+  const openPicker = (add: boolean) => {
+    addMode.current = add;
+    inputRef.current?.click();
+  };
+
+  const pickFiles = async (list: File[], add: boolean) => {
+    if (!list.length) return;
     setFileError(null);
-    if (file.size > MAX_FILE_SIZE) return setFileError("الملف أكبر من 1 جيجا.");
-    const type = mimeOf(file);
-    if (!type.startsWith("video/") && !type.startsWith("image/")) return setFileError("ارفع فيديو أو صورة فقط.");
+    if (list.some((f) => f.size > MAX_FILE_SIZE)) return setFileError("في ملف أكبر من 1 جيجا.");
+    const types = list.map(mimeOf);
+    if (types.some((t) => !t.startsWith("video/") && !t.startsWith("image/"))) return setFileError("ارفع فيديو أو صور فقط.");
+
+    const hasVideo = types.some((t) => t.startsWith("video/"));
+    if (hasVideo && (list.length > 1 || (add && media.length))) {
+      return setFileError("الفيديو ينرفع لحاله. البوست المتعدد يكون صور فقط.");
+    }
+    const keep = add && !hasVideo && media.every((m) => m.kind === "image") ? media : [];
+    if (keep.length + list.length > IG_CAROUSEL_MAX) {
+      return setFileError(`الحد ${IG_CAROUSEL_MAX} صور في البوست الواحد.`);
+    }
+
     setPreparing(true);
     try {
-      const prepared = await prepareMedia(file);
-      setMedia(prepared);
+      const prepared: PreparedMedia[] = [];
+      for (const file of list) prepared.push(await prepareMedia(file));
+      if (!keep.length) media.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+      setMedia([...keep, ...prepared]);
       setShorts(true);
     } catch (err) {
       setFileError((err as Error).message);
@@ -139,10 +201,22 @@ export function Composer({ connected, initialPostId }: Props) {
     }
   };
 
+  const removeAt = (index: number) => {
+    URL.revokeObjectURL(media[index].previewUrl);
+    setMedia(media.filter((_, i) => i !== index));
+  };
+
+  const move = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= media.length) return;
+    const next = [...media];
+    [next[index], next[target]] = [next[target], next[index]];
+    setMedia(next);
+  };
+
   const togglePlatform = (p: Platform) => {
     const next = { ...platforms, [p]: !platforms[p] };
     setPlatforms(next);
-    // When the description stops following the caption, start it from the caption text.
     if (!ytDescription && caption && next.youtube && !next.instagram) setYtDescription(caption);
   };
 
@@ -152,36 +226,44 @@ export function Composer({ connected, initialPostId }: Props) {
   };
 
   const reset = () => {
+    media.forEach((m) => URL.revokeObjectURL(m.previewUrl));
     setPhase("edit");
     setPostId(null);
-    setMedia(null);
+    setMedia([]);
     setCaption("");
     setYtDescription("");
     setYtTitle("");
     setTitleTouched(false);
     setTagsInput("");
     setUnified(true);
+    setWhen("now");
     setUploadPct(0);
     setSubmitError(null);
     window.history.replaceState(null, "", "/");
   };
 
   const publish = async () => {
-    if (errors.length || !media) return;
+    if (errors.length || !media.length) return;
     setSubmitError(null);
     setPhase("uploading");
     setUploadPct(0);
     try {
-      const uploadId = await uploadFile(media.file, (f) => setUploadPct(Math.round(f * 100)));
+      const thumbnail = await makeThumbnail(media[0]);
+      const uploadIds = await uploadFiles(
+        media.map((m) => m.file),
+        (f) => setUploadPct(Math.round(f * 100)),
+      );
       const selected: Platform[] = [...(ig ? (["instagram"] as const) : []), ...(yt ? (["youtube"] as const) : [])];
       const { id } = await apiJson<{ id: string }>("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uploadId,
+          uploadIds,
           platforms: selected,
           captionMode: separate ? "separate" : "unified",
-          media: { width: media.width, height: media.height, duration: media.duration },
+          scheduledAt: when === "later" ? new Date(scheduleAt).toISOString() : null,
+          thumbnail,
+          media: media.map((m) => ({ width: m.width, height: m.height, duration: m.duration })),
           instagram: ig ? { caption } : undefined,
           youtube: yt
             ? { title: effectiveTitle, description: effectiveDescription, tags, privacy, shorts: shorts && shortsEligible }
@@ -200,7 +282,7 @@ export function Composer({ connected, initialPostId }: Props) {
   if (phase === "publishing" && postId) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold">حالة النشر</h1>
+        <h1 className="text-2xl font-bold">حالة المنشور</h1>
         <PostStatus postId={postId} onNew={reset} />
       </div>
     );
@@ -209,10 +291,10 @@ export function Composer({ connected, initialPostId }: Props) {
   if (phase === "uploading") {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold">جاري رفع الملف</h1>
+        <h1 className="text-2xl font-bold">جاري رفع {media.length > 1 ? `${media.length} ملفات` : "الملف"}</h1>
         <div className="rounded-2xl border border-line bg-card p-5">
           <div className="flex items-center justify-between text-sm">
-            <span className="truncate font-medium">{media?.file.name}</span>
+            <span className="truncate font-medium">{media.length > 1 ? `${media.length} صور` : first?.file.name}</span>
             <span className="ltr font-semibold text-accent">{uploadPct}%</span>
           </div>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-canvas">
@@ -224,52 +306,113 @@ export function Composer({ connected, initialPostId }: Props) {
     );
   }
 
+  const canAddImages = media.length > 0 && media.every((m) => m.kind === "image") && media.length < IG_CAROUSEL_MAX;
+
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-bold">منشور جديد</h1>
 
       {/* 1. Media */}
       <section className="rounded-2xl border border-line bg-card p-4">
-        {media ? (
+        {media.length === 1 ? (
           <div className="flex flex-col gap-4 sm:flex-row">
             <div className="flex max-h-80 items-center justify-center overflow-hidden rounded-xl bg-ink/95 sm:w-56 sm:shrink-0">
-              {media.kind === "video" ? (
-                <video src={media.previewUrl} controls playsInline className="max-h-80 w-full object-contain" />
+              {first.kind === "video" ? (
+                <video src={first.previewUrl} controls playsInline className="max-h-80 w-full object-contain" />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={media.previewUrl} alt="معاينة" className="max-h-80 w-full object-contain" />
+                <img src={first.previewUrl} alt="معاينة" className="max-h-80 w-full object-contain" />
               )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col justify-between gap-3 text-sm">
               <div className="space-y-1">
-                <p className="truncate font-medium">{media.file.name}</p>
+                <p className="truncate font-medium">{first.file.name}</p>
                 <p className="text-muted">
-                  {media.kind === "video" ? "فيديو" : "صورة"} · {formatBytes(media.file.size)}
-                  {media.width && media.height && (
+                  {first.kind === "video" ? "فيديو" : "صورة"} · {formatBytes(first.file.size)}
+                  {first.width && first.height && (
                     <>
-                      {" "}· <span className="ltr">{media.width}×{media.height}</span>
+                      {" "}· <span className="ltr">{first.width}×{first.height}</span>
                     </>
                   )}
-                  {media.duration !== undefined && (
+                  {first.duration !== undefined && (
                     <>
-                      {" "}· <span className="ltr">{formatDuration(media.duration)}</span>
+                      {" "}· <span className="ltr">{formatDuration(first.duration)}</span>
                     </>
                   )}
                 </p>
-                {media.converted && <p className="text-xs text-muted">تم تحويل الصورة إلى JPEG لأن انستقرام ما يقبل غيره.</p>}
+                {first.converted && <p className="text-xs text-muted">تم تحويل الصورة إلى JPEG لأن انستقرام ما يقبل غيره.</p>}
               </div>
-              <button
-                onClick={() => inputRef.current?.click()}
-                className="self-start rounded-xl border border-line px-4 py-2 font-medium hover:bg-canvas"
-              >
-                تغيير الملف
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => openPicker(false)} className="rounded-xl border border-line px-4 py-2 font-medium hover:bg-canvas">
+                  تغيير الملف
+                </button>
+                {canAddImages && (
+                  <button onClick={() => openPicker(true)} className="rounded-xl border border-line px-4 py-2 font-medium hover:bg-canvas">
+                    + إضافة صور (بوست متعدد)
+                  </button>
+                )}
+              </div>
             </div>
+          </div>
+        ) : media.length > 1 ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium">بوست فيه {media.length} صور</span>
+              <span className="text-muted">انستقرام فقط · الترتيب مهم</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {media.map((m, i) => (
+                <div key={m.previewUrl} className="group relative aspect-square overflow-hidden rounded-xl bg-canvas">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.previewUrl} alt={`صورة ${i + 1}`} className="size-full object-cover" />
+                  <span className="absolute start-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-ink/80 text-xs font-semibold text-white">
+                    {i + 1}
+                  </span>
+                  <button
+                    onClick={() => removeAt(i)}
+                    aria-label="حذف الصورة"
+                    className="absolute end-1.5 top-1.5 flex size-6 items-center justify-center rounded-full bg-white/90 text-sm text-danger shadow"
+                  >
+                    ×
+                  </button>
+                  <div className="absolute inset-x-1.5 bottom-1.5 flex justify-between">
+                    <button
+                      onClick={() => move(i, -1)}
+                      disabled={i === 0}
+                      aria-label="قدّم الصورة"
+                      className="flex size-7 items-center justify-center rounded-full bg-white/90 text-sm shadow disabled:opacity-0"
+                    >
+                      →
+                    </button>
+                    <button
+                      onClick={() => move(i, 1)}
+                      disabled={i === media.length - 1}
+                      aria-label="أخّر الصورة"
+                      className="flex size-7 items-center justify-center rounded-full bg-white/90 text-sm shadow disabled:opacity-0"
+                    >
+                      ←
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {canAddImages && (
+                <button
+                  onClick={() => openPicker(true)}
+                  className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line text-sm text-muted hover:bg-canvas"
+                >
+                  <span className="text-2xl leading-none">+</span>
+                  إضافة
+                </button>
+              )}
+            </div>
+            <button onClick={() => openPicker(false)} className="text-sm font-medium text-accent">
+              البدء من جديد
+            </button>
           </div>
         ) : (
           <button
             type="button"
-            onClick={() => inputRef.current?.click()}
+            onClick={() => openPicker(false)}
             onDragOver={(e) => {
               e.preventDefault();
               setDragging(true);
@@ -278,7 +421,7 @@ export function Composer({ connected, initialPostId }: Props) {
             onDrop={(e) => {
               e.preventDefault();
               setDragging(false);
-              pickFile(e.dataTransfer.files[0]);
+              pickFiles(Array.from(e.dataTransfer.files), false);
             }}
             className={`flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-12 text-center transition ${
               dragging ? "border-accent bg-accent-soft" : "border-line hover:border-muted/50 hover:bg-canvas"
@@ -287,20 +430,22 @@ export function Composer({ connected, initialPostId }: Props) {
             <svg viewBox="0 0 24 24" className="size-9 text-muted" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden>
               <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="font-medium">{preparing ? "جاري تجهيز الملف…" : "اسحب الفيديو أو الصورة هنا"}</span>
-            <span className="text-sm text-muted">أو اضغط للاختيار من جهازك</span>
+            <span className="font-medium">{preparing ? "جاري تجهيز الملفات…" : "اختر فيديو، أو صورة، أو عدة صور"}</span>
+            <span className="text-sm text-muted">اضغط هنا للاختيار من جهازك (لين {IG_CAROUSEL_MAX} صور)</span>
           </button>
         )}
         <input
           ref={inputRef}
           type="file"
           accept="video/*,image/*"
+          multiple
           className="hidden"
           onChange={(e) => {
-            pickFile(e.target.files?.[0]);
+            pickFiles(Array.from(e.target.files ?? []), addMode.current);
             e.target.value = "";
           }}
         />
+        {preparing && media.length > 0 && <p className="mt-3 text-sm text-muted">جاري تجهيز الملفات…</p>}
         {fileError && <p className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">{fileError}</p>}
       </section>
 
@@ -319,7 +464,7 @@ export function Composer({ connected, initialPostId }: Props) {
             platform="youtube"
             label="YouTube"
             checked={yt}
-            disabledReason={!connected.youtube ? "غير مربوط" : media?.kind === "image" ? "فيديو فقط" : undefined}
+            disabledReason={!connected.youtube ? "غير مربوط" : kind && kind !== "video" ? "فيديو فقط" : undefined}
             onToggle={() => togglePlatform("youtube")}
           />
         </div>
@@ -444,42 +589,77 @@ export function Composer({ connected, initialPostId }: Props) {
             </div>
           </div>
 
-          {isVideo && (
-            <label className={`flex items-start gap-3 rounded-xl border border-line p-3 ${shortsEligible ? "cursor-pointer" : "opacity-60"}`}>
-              <input
-                type="checkbox"
-                checked={shorts && shortsEligible}
-                disabled={!shortsEligible}
-                onChange={(e) => setShorts(e.target.checked)}
-                className="mt-1 size-4 accent-[var(--color-accent)]"
-              />
-              <span className="text-sm">
-                <span className="block font-medium">انشره كـ Shorts</span>
-                <span className="text-muted">
-                  {shortsEligible ? (
-                    <>
-                      الفيديو عمودي وأقل من ٣ دقائق. بنضيف <span className="ltr">#Shorts</span> للعنوان.
-                    </>
-                  ) : (
-                    "متاح بس للفيديو العمودي اللي مدته ٣ دقائق أو أقل."
-                  )}
-                </span>
+          <label className={`flex items-start gap-3 rounded-xl border border-line p-3 ${shortsEligible ? "cursor-pointer" : "opacity-60"}`}>
+            <input
+              type="checkbox"
+              checked={shorts && shortsEligible}
+              disabled={!shortsEligible}
+              onChange={(e) => setShorts(e.target.checked)}
+              className="mt-1 size-4 accent-[var(--color-accent)]"
+            />
+            <span className="text-sm">
+              <span className="block font-medium">انشره كـ Shorts</span>
+              <span className="text-muted">
+                {shortsEligible ? (
+                  <>
+                    الفيديو عمودي وأقل من ٣ دقائق. بنضيف <span className="ltr">#Shorts</span> للعنوان.
+                  </>
+                ) : (
+                  "متاح بس للفيديو العمودي اللي مدته ٣ دقائق أو أقل."
+                )}
               </span>
-            </label>
+            </span>
+          </label>
+        </section>
+      )}
+
+      {/* 5. When */}
+      {media.length > 0 && (
+        <section className="space-y-3 rounded-2xl border border-line bg-card p-4">
+          <h2 className="font-semibold">وقت النشر</h2>
+          <div className="flex rounded-xl bg-canvas p-1 text-sm">
+            <SegButton active={when === "now"} onClick={() => setWhen("now")}>
+              انشر الحين
+            </SegButton>
+            <SegButton
+              active={when === "later"}
+              onClick={() => {
+                setWhen("later");
+                if (!scheduleAt) setScheduleAt(defaultScheduleTime());
+              }}
+            >
+              ⏰ جدولة
+            </SegButton>
+          </div>
+          {when === "later" && (
+            <div className="space-y-1.5">
+              <input
+                type="datetime-local"
+                value={scheduleAt}
+                min={toLocalInput(new Date(now + 5 * 60 * 1000))}
+                max={toLocalInput(new Date(now + SCHEDULE_MAX_DAYS * 86_400_000))}
+                onChange={(e) => setScheduleAt(e.target.value)}
+                className="ltr w-full rounded-xl border border-line bg-white px-3 py-2.5 outline-none focus:border-accent"
+              />
+              {scheduleAt && !Number.isNaN(Date.parse(scheduleAt)) && (
+                <p className="text-sm text-accent">بينزل: {friendlyDate(scheduleAt)}</p>
+              )}
+              <p className="text-xs text-muted">ينزل تلقائياً في وقته (خلال ٥ دقايق) حتى لو جوالك مطفي.</p>
+            </div>
           )}
         </section>
       )}
 
-      {/* 5. Publish */}
+      {/* 6. Publish */}
       <section className="space-y-3">
-        {media && warnings.length > 0 && (
+        {media.length > 0 && warnings.length > 0 && (
           <ul className="space-y-1 rounded-xl bg-warn-soft px-4 py-3 text-sm text-warn">
             {warnings.map((w) => (
               <li key={w}>⚠️ {w}</li>
             ))}
           </ul>
         )}
-        {media && errors.length > 0 && (
+        {media.length > 0 && errors.length > 0 && (
           <ul className="space-y-1 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
             {errors.map((e) => (
               <li key={e}>• {e}</li>
@@ -492,7 +672,8 @@ export function Composer({ connected, initialPostId }: Props) {
           disabled={errors.length > 0 || preparing}
           className="w-full rounded-xl bg-ink px-4 py-3.5 text-base font-semibold text-white transition hover:bg-ink/85 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          نشر{ig && yt ? " على المنصتين" : ig ? " على انستقرام" : yt ? " على يوتيوب" : ""}
+          {when === "later" ? "⏰ جدولة" : "نشر"}
+          {ig && yt ? " على المنصتين" : ig ? " على انستقرام" : yt ? " على يوتيوب" : ""}
         </button>
       </section>
     </div>

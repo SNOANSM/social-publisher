@@ -190,3 +190,58 @@ export async function uploadFile(file: File, onProgress: (fraction: number) => v
   }
   return uploadId;
 }
+
+/* ------------------------------ thumbnails ------------------------------ */
+
+function frameOf(prepared: PreparedMedia): Promise<CanvasImageSource & { width?: number }> {
+  if (prepared.kind === "image") return loadImage(prepared.previewUrl);
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const timer = setTimeout(() => reject(new Error("timeout")), 8000);
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.onloadeddata = () => {
+      video.currentTime = Math.min(1, (video.duration || 2) / 4);
+    };
+    video.onseeked = () => {
+      clearTimeout(timer);
+      resolve(video);
+    };
+    video.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("video"));
+    };
+    video.src = prepared.previewUrl;
+  });
+}
+
+/** Small square JPEG (base64, no prefix) used in the history calendar. Returns null if it can't be made. */
+export async function makeThumbnail(prepared: PreparedMedia, size = 240): Promise<string | null> {
+  try {
+    const source = await frameOf(prepared);
+    const w = (source as HTMLVideoElement).videoWidth || (source as HTMLImageElement).naturalWidth;
+    const h = (source as HTMLVideoElement).videoHeight || (source as HTMLImageElement).naturalHeight;
+    if (!w || !h) return null;
+    const side = Math.min(w, h);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    canvas.getContext("2d")!.drawImage(source, (w - side) / 2, (h - side) / 2, side, side, 0, 0, size, size);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+    return dataUrl.slice(dataUrl.indexOf(",") + 1);
+  } catch {
+    return null;
+  }
+}
+
+/** Uploads several files one after another, reporting overall progress (0..1). */
+export async function uploadFiles(files: File[], onProgress: (fraction: number) => void): Promise<string[]> {
+  const total = files.reduce((sum, f) => sum + f.size, 0);
+  let done = 0;
+  const ids: string[] = [];
+  for (const file of files) {
+    ids.push(await uploadFile(file, (f) => onProgress((done + f * file.size) / total)));
+    done += file.size;
+  }
+  return ids;
+}

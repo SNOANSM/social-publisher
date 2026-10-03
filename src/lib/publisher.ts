@@ -1,5 +1,5 @@
 // Runs inside the Netlify Background Function (up to 15 minutes).
-import { cleanupIfDone, getPost, getPostWithResults, getResult, setResult } from "./posts";
+import { cleanupIfDone, getPost, getPostWithResults, getResult, postItems, setResult } from "./posts";
 import { getUpload } from "./uploads";
 import { toPublishError, PublishError } from "./errors";
 import { publishToYouTube } from "./youtube";
@@ -47,10 +47,11 @@ export async function runPublish(postId: string, platform: Platform, attemptId: 
   };
 
   try {
-    const upload = await getUpload(post.uploadId);
-    if (!upload || !upload.complete) throw new PublishError("الملف المرفوع غير موجود أو انحذف. ارفعه من جديد.");
+    const uploads = await Promise.all(postItems(post).map((item) => getUpload(item.uploadId)));
+    if (uploads.some((u) => !u || !u.complete)) throw new PublishError("الملف المرفوع غير موجود أو انحذف. ارفعه من جديد.");
+    const files = uploads as NonNullable<(typeof uploads)[number]>[];
     const { id, url } =
-      platform === "youtube" ? await publishToYouTube(post, upload, progress) : await publishToInstagram(post, upload, progress);
+      platform === "youtube" ? await publishToYouTube(post, files[0], progress) : await publishToInstagram(post, files, progress);
     current = {
       ...current,
       status: "success",

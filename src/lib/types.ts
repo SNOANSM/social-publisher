@@ -4,10 +4,12 @@
 export type Platform = "instagram" | "youtube";
 export const PLATFORMS: Platform[] = ["instagram", "youtube"];
 
-export type MediaKind = "video" | "image";
+// "carousel" = several images in one Instagram post.
+export type MediaKind = "video" | "image" | "carousel";
 export type YouTubePrivacy = "public" | "unlisted" | "private";
 
-export type ResultStatus = "pending" | "processing" | "success" | "failed";
+// "scheduled" = waiting for Post.scheduledAt; the scheduler function turns it into "pending".
+export type ResultStatus = "scheduled" | "pending" | "processing" | "success" | "failed";
 
 export interface UploadMeta {
   id: string;
@@ -20,9 +22,26 @@ export interface UploadMeta {
   complete: boolean;
 }
 
+export interface MediaItem {
+  uploadId: string;
+  kind: "video" | "image";
+  fileName: string;
+  mimeType: string;
+  size: number;
+  width?: number;
+  height?: number;
+  duration?: number;
+}
+
 export interface Post {
   id: string;
   createdAt: string;
+  /** When set, the post is published by the scheduler at this time (ISO). */
+  scheduledAt?: string;
+  /** All files, in order. Older posts only have the single-file fields below. */
+  items?: MediaItem[];
+  hasThumb?: boolean;
+  // First file (kept for older posts and single-file code paths)
   uploadId: string;
   mediaKind: MediaKind;
   fileName: string;

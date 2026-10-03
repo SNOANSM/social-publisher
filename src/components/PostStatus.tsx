@@ -6,69 +6,100 @@ import { apiJson } from "@/lib/client-media";
 import type { Platform, PlatformResult, PostWithResults } from "@/lib/types";
 
 const isFinal = (r?: PlatformResult) => r?.status === "success" || r?.status === "failed";
+const isSettled = (r?: PlatformResult) => isFinal(r) || r?.status === "scheduled";
 
-// Polls the post until every platform has finished, and lets me retry only the failed ones.
+const fullDate = (iso: string) =>
+  new Intl.DateTimeFormat("ar", { dateStyle: "full", timeStyle: "short", calendar: "gregory", numberingSystem: "latn" }).format(new Date(iso));
+
+// Polls the post until every platform has finished (or is waiting for its scheduled time),
+// lets me retry only the failed ones, and cancel or publish-now a scheduled post.
 export function PostStatus({ postId, onNew }: { postId: string; onNew: () => void }) {
   const [data, setData] = useState<PostWithResults | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState<Platform | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [cancelled, setCancelled] = useState(false);
   const [tick, setTick] = useState(0);
 
-  const done = !!data && data.post.platforms.every((p) => isFinal(data.results[p]));
-
   useEffect(() => {
-    let cancelled = false;
+    if (cancelled) return;
+    let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       try {
         const next = await apiJson<PostWithResults>(`/api/posts/${postId}`, { cache: "no-store" });
-        if (cancelled) return;
+        if (stop) return;
         setData(next);
         setError(null);
-        if (!next.post.platforms.every((p) => isFinal(next.results[p]))) timer = setTimeout(load, 2500);
+        if (!next.post.platforms.every((p) => isSettled(next.results[p]))) timer = setTimeout(load, 2500);
       } catch (err) {
-        if (cancelled) return;
+        if (stop) return;
         setError((err as Error).message);
         timer = setTimeout(load, 5000);
       }
     };
     load();
     return () => {
-      cancelled = true;
+      stop = true;
       clearTimeout(timer);
     };
-  }, [postId, tick]);
+  }, [postId, tick, cancelled]);
 
-  const retry = async (platform: Platform) => {
-    setRetrying(platform);
+  const call = async (key: string, url: string, body?: unknown) => {
+    setBusy(key);
     try {
-      await apiJson(`/api/posts/${postId}/retry`, {
+      await apiJson(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform }),
+        body: body ? JSON.stringify(body) : undefined,
       });
-      setTick((t) => t + 1);
+      return true;
     } catch (err) {
       setError((err as Error).message);
+      return false;
     } finally {
-      setRetrying(null);
+      setBusy(null);
     }
   };
+
+  const retry = async (platform: Platform) => {
+    if (await call(platform, `/api/posts/${postId}/retry`, { platform })) setTick((t) => t + 1);
+  };
+  const publishNow = async () => {
+    if (await call("now", `/api/posts/${postId}/publish-now`)) setTick((t) => t + 1);
+  };
+  const cancel = async () => {
+    if (!confirm("متأكد تبي تلغي المنشور المجدول؟ بينحذف هو وملفاته.")) return;
+    if (await call("cancel", `/api/posts/${postId}/cancel`)) setCancelled(true);
+  };
+
+  if (cancelled) {
+    return (
+      <div className="space-y-4">
+        <p className="rounded-xl bg-canvas px-4 py-3 text-sm ring-1 ring-line">تم إلغاء المنشور المجدول وحذفه.</p>
+        <button onClick={onNew} className="w-full rounded-xl bg-ink px-4 py-3 font-medium text-white">
+          منشور جديد
+        </button>
+      </div>
+    );
+  }
 
   if (!data) {
     return (
       <div className="rounded-2xl border border-line bg-card p-6 text-center text-sm text-muted">
-        {error ?? "جاري تحميل حالة النشر…"}
+        {error ?? "جاري تحميل حالة المنشور…"}
       </div>
     );
   }
 
   const { post, results } = data;
+  const scheduled = post.platforms.filter((p) => results[p]?.status === "scheduled");
   const succeeded = post.platforms.filter((p) => results[p]?.status === "success");
   const failed = post.platforms.filter((p) => results[p]?.status === "failed");
+  const done = post.platforms.every((p) => isFinal(results[p]));
 
   let summary: { tone: "ok" | "danger" | "warn" | "info"; text: string };
-  if (!done) summary = { tone: "info", text: "جاري النشر… تقدر تسكّر الصفحة، النشر يكمل في الخلفية وتلقى النتيجة في السجل." };
+  if (scheduled.length && post.scheduledAt) summary = { tone: "info", text: `⏰ مجدول. بينزل ${fullDate(post.scheduledAt)}.` };
+  else if (!done) summary = { tone: "info", text: "جاري النشر… تقدر تسكّر الصفحة، النشر يكمل في الخلفية وتلقى النتيجة في السجل." };
   else if (!failed.length) summary = { tone: "ok", text: "تم النشر بنجاح 🎉" };
   else if (!succeeded.length) summary = { tone: "danger", text: "فشل النشر. شوف السبب تحت وأعد المحاولة." };
   else
@@ -84,19 +115,60 @@ export function PostStatus({ postId, onNew }: { postId: string; onNew: () => voi
     info: "bg-accent-soft text-accent",
   }[summary.tone];
 
+  const text = post.instagram?.caption || post.youtube?.title || "";
+  const count = post.items?.length ?? 1;
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center gap-3 rounded-2xl border border-line bg-card p-3">
+        {post.hasThumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`/api/posts/${post.id}/thumb`} alt="" className="size-16 shrink-0 rounded-xl object-cover" />
+        ) : (
+          <div className="flex size-16 shrink-0 items-center justify-center rounded-xl bg-canvas text-xs text-muted">
+            {post.mediaKind === "video" ? "فيديو" : "صورة"}
+          </div>
+        )}
+        <div className="min-w-0 text-sm">
+          <p className="text-xs text-muted">
+            {post.mediaKind === "video" ? "فيديو" : post.mediaKind === "carousel" ? `${count} صور` : "صورة"}
+          </p>
+          <p dir="auto" className="line-clamp-2">
+            {text || <span className="text-muted">بدون كابشن</span>}
+          </p>
+        </div>
+      </div>
+
       <p className={`rounded-xl px-4 py-3 text-sm font-medium ${toneClass}`}>{summary.text}</p>
       {error && <p className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">{error}</p>}
 
+      {scheduled.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={publishNow}
+            disabled={!!busy}
+            className="rounded-xl bg-ink px-4 py-3 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {busy === "now" ? "جاري…" : "انشر الحين"}
+          </button>
+          <button
+            onClick={cancel}
+            disabled={!!busy}
+            className="rounded-xl border border-line px-4 py-3 text-sm font-medium text-danger hover:bg-danger-soft disabled:opacity-50"
+          >
+            {busy === "cancel" ? "جاري…" : "إلغاء الجدولة"}
+          </button>
+        </div>
+      )}
+
       <div className="space-y-3">
         {post.platforms.map((p) => (
-          <PlatformCard key={p} platform={p} result={results[p]} onRetry={() => retry(p)} retrying={retrying === p} />
+          <PlatformCard key={p} platform={p} result={results[p]} onRetry={() => retry(p)} retrying={busy === p} />
         ))}
       </div>
 
-      {done && (
-        <button onClick={onNew} className="w-full rounded-xl bg-ink px-4 py-3 font-medium text-white transition hover:bg-ink/85">
+      {(done || scheduled.length > 0) && (
+        <button onClick={onNew} className="w-full rounded-xl border border-line bg-card px-4 py-3 font-medium hover:bg-canvas">
           منشور جديد
         </button>
       )}
@@ -117,6 +189,7 @@ function PlatformCard({
 }) {
   const status = result?.status ?? "pending";
   const badge = {
+    scheduled: { text: "مجدول ⏰", cls: "bg-accent-soft text-accent" },
     pending: { text: "بالانتظار", cls: "bg-canvas text-muted" },
     processing: { text: "جاري النشر", cls: "bg-accent-soft text-accent" },
     success: { text: "تم ✅", cls: "bg-ok-soft text-ok" },

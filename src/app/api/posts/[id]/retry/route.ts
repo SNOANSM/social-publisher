@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError, requireApiUser } from "@/lib/session";
-import { getPostWithResults, newPendingResult, setResult } from "@/lib/posts";
+import { getPostWithResults, newPendingResult, postItems, setResult } from "@/lib/posts";
 import { getUpload } from "@/lib/uploads";
 import { triggerPublish } from "@/lib/trigger";
 
@@ -20,8 +20,8 @@ export async function POST(req: Request, ctx: RouteContext<"/api/posts/[id]/retr
   const previous = data.results[platform];
   if (previous?.status !== "failed") return jsonError("ما تقدر تعيد المحاولة إلا للمنصة اللي فشلت.", 409);
 
-  const upload = await getUpload(data.post.uploadId);
-  if (!upload?.complete || data.post.mediaDeleted) {
+  const uploads = await Promise.all(postItems(data.post).map((item) => getUpload(item.uploadId)));
+  if (uploads.some((u) => !u?.complete) || data.post.mediaDeleted) {
     return jsonError("الملف الأصلي انحذف (تنحذف الملفات بعد ٣ أيام). ارفعه من جديد من صفحة النشر.", 410);
   }
 

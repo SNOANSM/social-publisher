@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Sans_Arabic } from "next/font/google";
 import "./globals.css";
+import { RegisterServiceWorker } from "@/components/RegisterServiceWorker";
 
 const arabic = IBM_Plex_Sans_Arabic({
   variable: "--font-arabic",
@@ -12,18 +13,25 @@ export const metadata: Metadata = {
   title: "ناشر",
   description: "انشر على انستقرام ويوتيوب من مكان واحد",
   robots: { index: false, follow: false },
+  applicationName: "ناشر",
+  appleWebApp: { capable: true, title: "ناشر", statusBarStyle: "default" },
+  icons: { apple: "/icon-180.png" },
 };
 
 export const viewport: Viewport = {
   themeColor: "#f5f5f2",
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="ar" dir="rtl" className={`${arabic.variable} h-full antialiased`}>
-      <body className="min-h-full font-sans">{children}</body>
+      <body className="min-h-full font-sans">
+        {children}
+        <RegisterServiceWorker />
+      </body>
     </html>
   );
 }
