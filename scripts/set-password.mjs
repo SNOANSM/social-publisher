@@ -36,7 +36,8 @@ function hashPassword(password) {
 
 function setNetlify(key, value, secret) {
   const args = ["netlify", "env:set", key, value];
-  if (secret) args.push("--secret");
+  // Netlify only accepts secret values for non-development contexts.
+  if (secret) args.push("--secret", "--context", "production", "deploy-preview", "branch-deploy");
   const res = spawnSync("npx", args, { stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
   if (res.status !== 0) {
     console.error(`\n✖ ما قدرت أحفظ ${key} في Netlify:\n${res.stderr?.toString() ?? ""}`);
@@ -53,20 +54,23 @@ function setLocal(values) {
   writeFileSync(".env", env.startsWith("\n") ? env.slice(1) : env);
 }
 
-const email = (await ask("الإيميل اللي بتسجل فيه: ")).trim().toLowerCase();
-if (!/^[^\s@"'`$&|;<>()\\]+@[^\s@"'`$&|;<>()\\]+\.[a-z]{2,}$/i.test(email)) {
-  console.error("✖ الإيميل غير صحيح.");
-  process.exit(1);
+let email = "";
+for (;;) {
+  email = (await ask("الإيميل اللي بتسجل فيه: ")).trim().toLowerCase();
+  if (/^[^\s@"'`$&|;<>()\\]+@[^\s@"'`$&|;<>()\\]+\.[a-z]{2,}$/i.test(email)) break;
+  console.log("✖ الإيميل غير صحيح، اكتبه مرة ثانية.");
 }
-const password = await ask("كلمة المرور (10 أحرف أو أكثر): ", { hidden: true });
-if (password.length < 10) {
-  console.error("✖ كلمة المرور لازم تكون 10 أحرف أو أكثر.");
-  process.exit(1);
-}
-const confirm = await ask("أعد كتابة كلمة المرور: ", { hidden: true });
-if (confirm !== password) {
-  console.error("✖ كلمتين المرور مو متطابقة.");
-  process.exit(1);
+
+let password = "";
+for (;;) {
+  password = await ask("كلمة المرور (10 أحرف أو أكثر): ", { hidden: true });
+  if (password.length < 10) {
+    console.log(`✖ كتبت ${password.length} أحرف بس. لازم 10 أو أكثر، جرّب مرة ثانية.`);
+    continue;
+  }
+  const confirm = await ask("أعد كتابة كلمة المرور: ", { hidden: true });
+  if (confirm === password) break;
+  console.log("✖ الكلمتين مو متطابقة، نبدأ كلمة المرور من جديد.");
 }
 
 const hash = hashPassword(password);
