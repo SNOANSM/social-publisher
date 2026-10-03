@@ -14,7 +14,9 @@ function ask(question, { hidden = false } = {}) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     if (hidden) {
       rl._writeToOutput = (s) => {
-        if (s.includes(question)) rl.output.write(s);
+        // Mask everything typed or pasted, even when readline redraws the prompt + line together.
+        const i = s.indexOf(question);
+        if (i !== -1) rl.output.write(s.slice(0, i + question.length) + "*".repeat(Math.max(0, s.length - i - question.length)));
         else if (s === "\r\n" || s === "\n") rl.output.write(s);
         else rl.output.write("*".repeat(s.length));
       };

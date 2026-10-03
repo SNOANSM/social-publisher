@@ -16,7 +16,10 @@ function ask(question, hidden) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
     if (hidden) {
       rl._writeToOutput = (s) => {
-        if (s.includes(question) || s === "\r\n" || s === "\n") rl.output.write(s);
+        // Mask everything typed or pasted, even when readline redraws the prompt + line together.
+        const i = s.indexOf(question);
+        if (i !== -1) rl.output.write(s.slice(0, i + question.length) + "*".repeat(Math.max(0, s.length - i - question.length)));
+        else if (s === "\r\n" || s === "\n") rl.output.write(s);
         else rl.output.write("*".repeat(s.length));
       };
     }
@@ -46,7 +49,13 @@ for (const { key, label, secret, check } of KEYS) {
     const value = await ask(`${label}: `, secret);
     if (!value) break;
     if (!check.test(value)) {
-      console.log("✖ الشكل مو صحيح، تأكد إنك نسخت القيمة كاملة وجرّب مرة ثانية.");
+      const hint =
+        key === "AUTH_GOOGLE_SECRET" && !value.startsWith("GOCSPX-")
+          ? value.includes(".apps.googleusercontent.com")
+            ? "اللي لصقته هو Client ID، مو السر. انسخ الكود اللي يبدأ بـ GOCSPX-."
+            : "اللي لصقته ما يبدأ بـ GOCSPX-. انسخ السر من Google مرة ثانية."
+          : `اللي لصقته طوله ${value.length} حرف وشكله مو صحيح. تأكد إنك نسخت القيمة كاملة.`;
+      console.log(`✖ ${hint}`);
       continue;
     }
     if (setNetlify(key, value, secret)) {
